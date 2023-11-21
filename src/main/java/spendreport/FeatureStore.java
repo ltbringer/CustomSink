@@ -56,7 +56,6 @@ public class FeatureStore extends RichSinkFunction<Feature>{
         String sql = String.format("create table %s (%s)", tableName, schemaString);
         Statement statement = connection.createStatement();
         statement.execute(sql);
-        connection.close();
     }
 
     @Override
