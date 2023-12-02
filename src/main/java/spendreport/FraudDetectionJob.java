@@ -18,6 +18,7 @@
 
 package spendreport;
 
+import org.apache.flink.api.connector.sink.Sink;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.walkthrough.common.entity.Transaction;
@@ -39,14 +40,12 @@ public class FraudDetectionJob {
 			.process(new FraudDetector())
 			.name("fraud-detector");
 
-		final String dbSource = "db.sqlite";
-		final String tableName = "features";
-		FeatureStore featureStore = new FeatureStore()
-			.setSrc(dbSource)
-			.setTable(tableName);
+//		final String dbSource = "db.sqlite";
+//		final String tableName = "features";
+		FeatureStoreSink featureStoreSink = new FeatureStoreSink();
 
 		features
-			.addSink(featureStore)
+			.sinkTo(featureStoreSink)
 			.name("send-alerts");
 
 		env.setParallelism(1);
