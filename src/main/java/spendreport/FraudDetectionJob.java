@@ -18,9 +18,10 @@
 
 package spendreport;
 
-import org.apache.flink.api.connector.sink.Sink;
+
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.types.Row;
 import org.apache.flink.walkthrough.common.entity.Transaction;
 import org.apache.flink.walkthrough.common.source.TransactionSource;
 
@@ -35,13 +36,13 @@ public class FraudDetectionJob {
 			.addSource(new TransactionSource())
 			.name("transactions");
 
-		DataStream<Feature> features = transactions
+		DataStream<Row> features = transactions
 			.keyBy(Transaction::getAccountId)
-			.process(new FraudDetector())
+			.process(new DataGenerator())
 			.name("fraud-detector");
 
-//		final String dbSource = "db.sqlite";
-//		final String tableName = "features";
+		final String dbSource = "db.sqlite";
+		final String tableName = "features";
 		FeatureStoreSink featureStoreSink = new FeatureStoreSink();
 
 		features

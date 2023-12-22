@@ -3,22 +3,22 @@ package spendreport;
 import java.io.IOException;
 import java.sql.*;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Optional;
 import java.util.UUID;
 
-import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.connector.sink2.SinkWriter;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
+import org.apache.flink.types.Row;
 
-public class FeatureStore implements SinkWriter<Feature> {
+public class FeatureStore implements SinkWriter<Row> {
     private final Connection connection;
-    private final PreparedStatement preparedStatement;
+    private final PreparedStatement insertStatement;
     private final String tableName;
     private final String dbSource;
     private final String sqlitePrefix = "jdbc:sqlite:";
-    private final String[] columns = {"id", "data", "ts", "idempotence_key"};
-    private final String[] dTypes = {"integer", "blob", "timestamp", "text"};
+    private final String[] columns = {"id", "data", "ts"};
+    private final String[] dTypes = {"integer", "blob", "timestamp"};
     private transient Instant time = Instant.now();
 
     private final UUID id = UUID.randomUUID();
@@ -30,16 +30,26 @@ public class FeatureStore implements SinkWriter<Feature> {
             this.createTableIfNotExists();
             this.connection = DriverManager.getConnection(sqlitePrefix + dbSource);
             this.connection.setAutoCommit(false);
-            this.preparedStatement = connection.prepareStatement(sqlBuilder());
+            this.insertStatement = connection.prepareStatement(insertSQLBuilder());
         } catch (SQLException e) {
             throw new IOException(e);
         }
     }
 
-    private String sqlBuilder() {
+    private String updateSQLBuilder() {
+        // all columns except 'id'
+        String[] nonIdCols = Arrays.copyOfRange(columns, 1, columns.length);
+        String columnString = String.join(", ", nonIdCols);
+        String valuePlaceholders = String.join(", ", Collections.nCopies(nonIdCols.length, "?"));
+        return String.format("update %s set (%s) values (%s) where id = ?", tableName, columnString, valuePlaceholders);
+    }
+
+    private String insertSQLBuilder() {
         String columnString = String.join(", ", columns);
         String valuePlaceholders = String.join(", ", Collections.nCopies(columns.length, "?"));
-        return String.format("insert into %s (%s) values (%s)", tableName, columnString, valuePlaceholders);
+        String[] nonIdCols = Arrays.copyOfRange(columns, 1, columns.length);
+        String updateString = String.join(", ", Arrays.stream(nonIdCols).map(col -> col + " = ?").toArray(String[]::new));
+        return String.format("insert into %s (%s) values (%s) ON CONFLICT (id) DO UPDATE SET %s;", tableName, columnString, valuePlaceholders, updateString);
     }
 
     private boolean isTableExists(Connection connection) throws SQLException {
@@ -54,13 +64,12 @@ public class FeatureStore implements SinkWriter<Feature> {
     public void createTableIfNotExists() throws IOException {
         try (Connection connection = DriverManager.getConnection(sqlitePrefix + dbSource);
              Statement statement = connection.createStatement();) {
-            StringBuilder schemaString = new StringBuilder();
-            String delimiter;
-            for (int i = 0; i < columns.length; i++) {
-                delimiter = i < columns.length - 1 ? ", " : "";
-                schemaString.append(String.format("%s %s%s", columns[i], dTypes[i], delimiter));
-            }
-            String sql = String.format("create table if not exists %s (%s)", tableName, schemaString);
+
+            String sql = String.format("create table if not exists %s (" +
+                        "id INTEGER PRIMARY KEY," +
+                        "data BLOB," +
+                        "ts TIMESTAMP" +
+                    ")", tableName);
             statement.execute(sql);
         } catch (SQLException e) {
             throw new IOException(e);
@@ -72,21 +81,29 @@ public class FeatureStore implements SinkWriter<Feature> {
         if (connection != null) {
             connection.close();
         }
-        if (preparedStatement != null) {
-            preparedStatement.close();
+        if (insertStatement != null) {
+            insertStatement.close();
         }
     }
 
     @Override
-    public void write(Feature feature, Context context) throws IOException, InterruptedException {
+    public void write(Row feature, Context context) throws IOException, InterruptedException {
         String message = String.format("Sinking feature (%s) for (%s)", feature, id);
-        System.out.println(message);
         try {
-            preparedStatement.setLong(1, feature.getId());
-            preparedStatement.setBytes(2, feature.getData());
-            preparedStatement.setTimestamp(3, new Timestamp(feature.getTs()));
-            preparedStatement.setString(4, feature.getKey().toString());
-            preparedStatement.addBatch();
+            Optional<Long> id = Optional.ofNullable((Long) feature.getField("id"));
+            Optional<String> data = Optional.ofNullable((String) feature.getField("data"));
+            Optional<Long> ts = Optional.ofNullable((Long) feature.getField("ts"));
+
+            if (id.isEmpty() || data.isEmpty() || ts.isEmpty()) {
+                throw new IOException("Feature is missing required fields");
+            }
+
+            insertStatement.setLong(1, id.get());
+            insertStatement.setBytes(2, data.get().getBytes());
+            insertStatement.setTimestamp(3, new Timestamp(ts.get()));
+            insertStatement.setBytes(4, data.get().getBytes());
+            insertStatement.setTimestamp(5, new Timestamp(ts.get()));
+            insertStatement.addBatch();
             if (Instant.now().isAfter(time.plusSeconds(5))) {
                 executeBatch();
                 time = Instant.now();
@@ -95,15 +112,11 @@ public class FeatureStore implements SinkWriter<Feature> {
             throw new IOException(e);
         }
     }
-
     private void executeBatch() throws IOException {
         String message = String.format("Executing batch for (%s)", id);
-        System.out.println(message);
         try {
-            preparedStatement.executeBatch();
-            System.out.println("Executing batch");
+            insertStatement.executeBatch();
             connection.commit();
-            System.out.println("Committing batch");
         } catch (SQLException e) {
             throw new IOException(e);
         }

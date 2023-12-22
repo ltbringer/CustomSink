@@ -36,7 +36,7 @@ under the License.
 		<maven.compiler.source>${target.java.version}</maven.compiler.source>
 		<maven.compiler.target>${target.java.version}</maven.compiler.target>
 		<log4j.version>2.17.1</log4j.version>
-		<aws.java.sdk.version>2.21.23</aws.java.sdk.version>
+		<aws.java.sdk.version>2.21.38</aws.java.sdk.version>
 	</properties>
 
 	<repositories>
@@ -72,6 +72,18 @@ under the License.
 			<artifactId>flink-clients</artifactId>
 			<version>${flink.version}</version>
 			<scope>provided</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>sagemakerfeaturestoreruntime</artifactId>
+			<version>${aws.java.sdk.version}</version>
+		</dependency>
+
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>sagemaker</artifactId>
+			<version>${aws.java.sdk.version}</version>
 		</dependency>
 
 		<dependency>
